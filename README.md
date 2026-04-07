@@ -9,10 +9,10 @@ Unlike traditional medical Q&A benchmarks that test knowledge recall, Killbench 
 Killbench uses a **three-LLM architecture** that separates the tested model from the simulation infrastructure:
 
 ```
-┌─────────────────┐     questions/actions     ┌──────────────┐
+┌─────────────────┐     questions/actions      ┌──────────────┐
 │   Tested LLM    │ ──────────────────────────▶│ Gate Referee │
-│   (Doctor)      │                            │ (Sonnet 4)   │
-│                 │     gates triggered?        │              │
+│   (Doctor)      │                            │              │
+│                 │     gates triggered?       │              │
 │                 │ ◀──────────────────────────│              │
 └────────┬────────┘                            └──────────────┘
          │                                            │
@@ -21,7 +21,7 @@ Killbench uses a **three-LLM architecture** that separates the tested model from
          │
          │         role-played response        ┌──────────────┐
          │ ◀───────────────────────────────────│Answer Server │
-         │                                     │ (Sonnet 4)   │
+         │                                     │              │
          └─────────────────────────────────────│              │
                                                └──────────────┘
 ```
