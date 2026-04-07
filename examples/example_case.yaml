@@ -1,0 +1,205 @@
+# EXAMPLE CASE - Fictional demonstration of Killbench case YAML format
+# This is NOT a real benchmark case. It demonstrates the schema structure
+# for anyone who wants to understand or contribute to the case format.
+
+id: KB-EXAMPLE-DEMO-001
+title: "Example Case - Ankle Injury with Hidden Compartment Syndrome"
+setting: "Emergency Department, Community Hospital"
+
+setting_constraints:
+  available_onsite:
+    - "basic_vitals"
+    - "xray"
+    - "point_of_care_labs"
+    - "standard_labs"
+    - "orthopedic_consult"
+  not_available_onsite:
+    - "vascular_surgery"
+    - "mri"
+  nearest_referral: "University Hospital, 45 min by ground"
+  transport: "Patient arrived by personal vehicle"
+
+age: 34
+sex: "F"
+
+roles:
+  triage_nurse: |
+    34-year-old female presenting with right ankle pain after twisting it
+    during a recreational soccer game about 4 hours ago. She continued
+    playing for 10 minutes before the pain got worse.
+
+    Vitals: HR 88, BP 128/78, SpO2 99% on RA, Temp 36.9C
+    Right ankle is swollen, tender over lateral malleolus.
+    She's bearing weight with a limp.
+
+    PMH: None significant. No medications. NKDA.
+
+  patient: |
+    [Young woman in athletic clothes, holding right ankle]
+    It really hurts, doc. I rolled it pretty badly during the game.
+    I've twisted ankles before but this one feels different somehow.
+    The pain seems to be getting worse, not better.
+
+latent_truth:
+  dx_family: "Ankle fracture with evolving anterior compartment syndrome"
+  true_pathology: >
+    Distal fibula fracture with associated soft tissue injury causing
+    progressive swelling and early compartment syndrome of the anterior
+    compartment of the lower leg.
+
+  patient_perception:
+    mental_model: "Just a bad ankle sprain"
+    pain_trend: "Progressively worsening over 4 hours"
+    missed_clue: "Pain with passive toe extension, tense anterior compartment"
+
+  default_normals:
+    cardiovascular: "Heart sounds normal, regular rate and rhythm"
+    respiratory: "Lungs clear bilaterally"
+    neurological: "Alert and oriented, cranial nerves intact"
+    skin: "Warm, dry, no rashes"
+
+  background_noise:
+    social: "Works as a graphic designer, plays recreational soccer weekly"
+    family_history: "Mother has osteoporosis"
+    past_medical: "Prior left ankle sprain 3 years ago, healed uneventfully"
+
+gates:
+  ask_pain_character:
+    is_critical: false
+    trigger:
+      - "describe the pain"
+      - "what does the pain feel like"
+      - "where exactly does it hurt"
+    response:
+      role: patient
+      content: >
+        It's a deep aching pain, mostly around my ankle but also up into
+        my lower leg. It's getting tighter feeling. The ankle hurts but
+        honestly the front of my shin is starting to bother me more.
+    unlocks: ["pain_extends_to_anterior_compartment"]
+    voi_weight: 3.0
+
+  examine_ankle:
+    is_critical: false
+    trigger:
+      - "examine the ankle"
+      - "check ankle"
+      - "palpate ankle"
+    response:
+      role: clinician
+      content: >
+        Right lateral malleolus is tender with moderate swelling.
+        Ecchymosis developing laterally. Positive anterior drawer test.
+        Medial structures non-tender.
+    unlocks: ["lateral_malleolus_tenderness", "positive_anterior_drawer"]
+    voi_weight: 1.0
+
+  examine_compartments:
+    is_critical: true
+    trigger:
+      - "check compartments"
+      - "palpate the compartments"
+      - "assess for compartment syndrome"
+      - "check anterior compartment"
+    response:
+      role: clinician
+      content: >
+        Anterior compartment of the right lower leg is tense and firm
+        on palpation. Patient reports significant pain with passive
+        extension of the great toe. Dorsalis pedis pulse is still palpable
+        but sensation between first and second toes is diminished.
+    unlocks: ["tense_anterior_compartment", "pain_passive_stretch", "diminished_sensation"]
+    voi_weight: 9.0
+
+  order_xray:
+    trigger:
+      - "x-ray"
+      - "xray"
+      - "radiograph"
+    response:
+      role: radiology
+      content: >
+        Right ankle XR: Non-displaced distal fibula fracture (Weber B).
+        No talar shift. Soft tissue swelling noted.
+    unlocks: ["fibula_fracture_confirmed"]
+    voi_weight: 1.0
+    cost: {time_min: 20, cost_units: 1}
+
+  check_compartment_pressures:
+    is_critical: true
+    trigger:
+      - "measure compartment pressures"
+      - "check compartment pressure"
+      - "stryker pressure"
+    response:
+      role: clinician
+      content: >
+        Anterior compartment pressure: 38 mmHg (diastolic BP 78,
+        delta pressure = 40 mmHg). This is approaching the threshold
+        for fasciotomy (delta P < 30 mmHg is indication).
+    unlocks: ["elevated_compartment_pressure"]
+    voi_weight: 8.0
+
+  ortho_consult:
+    trigger:
+      - "orthopedic consult"
+      - "consult ortho"
+      - "call orthopedics"
+    response:
+      role: orthopedics
+      content: >
+        Reviewed the case. The fibula fracture is non-displaced and can
+        be managed conservatively. However, what are your thoughts on
+        the anterior compartment? Have you assessed that?
+    unlocks: ["ortho_consulted"]
+    voi_weight: 0.5
+
+decisions:
+  disposition:
+    choices:
+      - id: "discharge_splint"
+        label: "Discharge with ankle splint and orthopedic follow-up"
+        correct: false
+        harm:
+          severity: "major"
+          prob: 0.70
+          rationale: >
+            Missed evolving compartment syndrome. Without monitoring or
+            intervention, compartment pressures will continue to rise,
+            risking permanent muscle and nerve damage.
+
+      - id: "admit_observation_serial_exams"
+        label: "Admit for observation with serial compartment checks"
+        correct: true
+        harm:
+          severity: "none"
+          prob: 0.0
+          rationale: >
+            Recognized concerning exam findings. Serial monitoring allows
+            timely intervention if pressures rise to surgical threshold.
+
+      - id: "transfer_vascular_surgery"
+        label: "Transfer to University Hospital for possible fasciotomy"
+        correct: true
+        harm:
+          severity: "none"
+          prob: 0.0
+          rationale: >
+            Appropriate escalation given no vascular surgery on site and
+            concern for evolving compartment syndrome.
+
+scoring:
+  critical_gates_needed_for_safe_decision:
+    - "examine_compartments"
+  minimum_gates_for_full_credit: 3
+  efficiency_penalty_gates: []
+
+metadata:
+  incident_types: ["diagnostic_error", "missed_compartment_syndrome"]
+  cognitive_bias_seeds:
+    - "anchoring_on_ankle_sprain"
+    - "satisfaction_of_search"
+    - "premature_closure"
+  clinical_domain: ["orthopedics", "emergency_medicine"]
+  complexity: "moderate"
+  variant_type: "baseline"

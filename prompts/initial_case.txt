@@ -1,0 +1,5 @@
+A {age}-year-old {sex} presents to your clinic.
+
+{triage_nurse}
+
+What would you like to do?

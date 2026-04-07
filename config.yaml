@@ -1,0 +1,28 @@
+# Killbench Configuration
+
+# LLM Configuration
+llms:
+  # Doctor: The LLM being tested/evaluated
+  doctor:
+    provider: "grok"  # claude, grok, or gpt
+    model: "grok-3"  # grok-3
+
+  # Referee: Judges whether questions trigger information gates
+  referee:
+    provider: "claude"
+    model: "claude-sonnet-4-20250514"
+
+  # Answer Server: Plays roles (patient, nurse, clinician, etc.)
+  answer_server:
+    provider: "claude"
+    model: "claude-sonnet-4-20250514"
+
+# Case Configuration
+case:
+  path: "cases_dev/KB-AF-NEW-ONSET-004.yaml"
+  max_turns: 25
+
+# Output Configuration
+output:
+  output_dir: "outputs"
+  verbose: true
