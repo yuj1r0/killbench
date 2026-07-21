@@ -9,6 +9,7 @@ import json
 import yaml
 import argparse
 import traceback
+import concurrent.futures
 from datetime import datetime
 from dotenv import load_dotenv
 from llm_clients import get_llm_client
@@ -52,6 +53,9 @@ def main():
                         help='Directories, globs, or files of cases (default: cases cases_dev)')
     parser.add_argument('--doctor', type=str, help='Doctor LLM model (e.g. gemini-3.5-flash)')
     parser.add_argument('--max-turns', type=int, help='Max turns per case (overrides config.yaml)')
+    parser.add_argument('--workers', '-j', type=int, default=4,
+                        help='Cases to run concurrently (default 4; cases are independent). '
+                             'Use 1 for sequential/verbose output.')
     args = parser.parse_args()
 
     load_dotenv()
@@ -95,13 +99,15 @@ def main():
     doctor_model = config['llms']['doctor']['model'].replace('/', '_').replace('-', '_')
     batch_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    summary_rows = []
-    for i, case_path in enumerate(case_files, 1):
-        case_filename = os.path.splitext(os.path.basename(case_path))[0]
-        print("\n" + "#" * 80)
-        print(f"# CASE {i}/{len(case_files)}: {case_filename}")
-        print("#" * 80)
+    # Verbose per-turn output only makes sense sequentially; with >1 worker the
+    # streams would interleave, so we suppress it and print a line per finished case.
+    verbose = config['output']['verbose'] and args.workers <= 1
 
+    def run_one(case_path):
+        """Run a single case end-to-end and return its summary row. Cases are
+        independent (fresh orchestrator, shared thread-safe LLM clients), so this
+        is safe to call concurrently."""
+        case_filename = os.path.splitext(os.path.basename(case_path))[0]
         row = {'case_file': case_path}
         try:
             orchestrator = CaseOrchestrator(
@@ -110,11 +116,10 @@ def main():
                 referee_llm=referee_llm,
                 answer_llm=answer_llm,
             )
-            result = orchestrator.run_case(max_turns=max_turns, verbose=config['output']['verbose'])
+            result = orchestrator.run_case(max_turns=max_turns, verbose=verbose)
 
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            out_name = f"{timestamp}_{case_filename}_{doctor_model}.json"
-            out_file = os.path.join(output_dir, out_name)
+            out_file = os.path.join(output_dir, f"{timestamp}_{case_filename}_{doctor_model}.json")
             with open(out_file, 'w') as f:
                 json.dump(result, f, indent=2)
 
@@ -129,11 +134,39 @@ def main():
                 'output_file': out_file,
             })
         except Exception as e:
-            print(f"\n❌ Case failed: {e}")
-            traceback.print_exc()
-            row.update({'status': 'error', 'error': str(e)})
+            row.update({'status': 'error', 'error': str(e), '_traceback': traceback.format_exc()})
+        return row
 
-        summary_rows.append(row)
+    summary_rows = []
+    total = len(case_files)
+    if args.workers > 1:
+        print(f"Running {total} cases with {args.workers} workers...\n")
+        with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as ex:
+            futures = {ex.submit(run_one, cp): cp for cp in case_files}
+            for done, fut in enumerate(concurrent.futures.as_completed(futures), 1):
+                row = fut.result()
+                summary_rows.append(row)
+                cid = (row.get('case_id') or os.path.basename(row['case_file']))[:50]
+                if row.get('status') == 'error':
+                    print(f"  [{done}/{total}] ❌ ERROR  {cid}\n{row.get('_traceback', '')}")
+                else:
+                    c = row.get('correct')
+                    mark = '✓' if c is True else ('✗' if c is False else '?')
+                    print(f"  [{done}/{total}] {mark}  {cid:<50} {row.get('status')}")
+    else:
+        for i, case_path in enumerate(case_files, 1):
+            print("\n" + "#" * 80)
+            print(f"# CASE {i}/{total}: {os.path.splitext(os.path.basename(case_path))[0]}")
+            print("#" * 80)
+            row = run_one(case_path)
+            if row.get('status') == 'error':
+                print(f"\n❌ Case failed: {row.get('error')}\n{row.get('_traceback', '')}")
+            summary_rows.append(row)
+
+    # Stable ordering for the summary (parallel completion order is arbitrary)
+    summary_rows.sort(key=lambda r: r['case_file'])
+    for r in summary_rows:
+        r.pop('_traceback', None)
 
     # Write a batch summary
     summary = {
