@@ -32,17 +32,23 @@ import argparse
 # Pareto view. VERIFY these before quoting costs -- non-Anthropic prices in
 # particular are placeholders. Key by model id substring (first match wins).
 PRICES = {
-    # Anthropic (from the claude-api reference; Sonnet 5 shown at list price)
-    "claude-sonnet-5":   {"in": 3.00,  "out": 15.00},
-    "claude-sonnet-4":   {"in": 3.00,  "out": 15.00},
-    "claude-opus-4":     {"in": 5.00,  "out": 25.00},
-    "claude-haiku-4":    {"in": 1.00,  "out": 5.00},
+    # Anthropic (claude.com/pricing). NOTE: Sonnet 5 is at introductory pricing
+    # ($2/$10) through 2026-08-31; it becomes $3/$15 on 2026-09-01.
+    "claude-fable-5":         {"in": 10.00, "out": 50.00},
+    "claude-sonnet-5":        {"in": 2.00,  "out": 10.00},   # intro; $3/$15 after 2026-08-31
+    "claude-sonnet-4":        {"in": 3.00,  "out": 15.00},
+    "claude-opus-4":          {"in": 5.00,  "out": 25.00},
+    "claude-haiku-4":         {"in": 1.00,  "out": 5.00},
+    # Gemini (ai.google.dev pricing, paid tier). More specific keys first so
+    # "-flash-lite" isn't shadowed by the "-flash" substring match.
+    "gemini-3.5-flash-lite":  {"in": 0.30,  "out": 2.50},
+    "gemini-3.5-flash":       {"in": 1.50,  "out": 9.00},
+    "gemini-3.6-flash":       {"in": 1.50,  "out": 7.50},
     # Others -- PLACEHOLDERS, confirm against the provider's current pricing
-    "gpt-4.1":           {"in": 2.00,  "out": 8.00},
-    "gpt-4o":            {"in": 2.50,  "out": 10.00},
-    "gemini-3.5-flash":  {"in": 0.30,  "out": 2.50},
-    "grok-4":            {"in": 3.00,  "out": 15.00},
-    "grok-3":            {"in": 3.00,  "out": 15.00},
+    "gpt-4.1":                {"in": 2.00,  "out": 8.00},
+    "gpt-4o":                 {"in": 2.50,  "out": 10.00},
+    "grok-4":                 {"in": 3.00,  "out": 15.00},
+    "grok-3":                 {"in": 3.00,  "out": 15.00},
 }
 
 
