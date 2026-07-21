@@ -37,7 +37,7 @@ class ClaudeClient(LLMClient):
     """Anthropic Claude client"""
     
     def __init__(self, api_key=None, model="claude-sonnet-4-20250514"):
-        self.client = Anthropic(api_key=api_key or os.getenv("ANTHROPIC_API_KEY"))
+        self.client = Anthropic(api_key=api_key or os.getenv("ANTHROPIC_API_KEY"), max_retries=5)
         self.model = model
     
     def generate(self, system_prompt, user_message=None, conversation_history=None,
@@ -95,7 +95,8 @@ class GrokClient(LLMClient):
     def __init__(self, api_key=None, model="grok-beta"):
         self.client = OpenAI(
             api_key=api_key or os.getenv("XAI_API_KEY"),
-            base_url="https://api.x.ai/v1"
+            base_url="https://api.x.ai/v1",
+            max_retries=5
         )
         self.model = model
     
@@ -133,7 +134,7 @@ class GPTClient(LLMClient):
     """OpenAI GPT client"""
     
     def __init__(self, api_key=None, model="gpt-4"):
-        self.client = OpenAI(api_key=api_key or os.getenv("OPENAI_API_KEY"))
+        self.client = OpenAI(api_key=api_key or os.getenv("OPENAI_API_KEY"), max_retries=5)
         self.model = model
     
     def generate(self, system_prompt, user_message=None, conversation_history=None,
@@ -172,7 +173,8 @@ class GeminiClient(LLMClient):
     def __init__(self, api_key=None, model="gemini-2.5-flash"):
         self.client = OpenAI(
             api_key=api_key or os.getenv("GOOGLE_API_KEY"),
-            base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
+            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
+            max_retries=5
         )
         self.model = model
 
