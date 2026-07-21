@@ -50,6 +50,9 @@ def main():
         elif args.doctor.startswith('gpt'):
             config['llms']['doctor']['provider'] = 'gpt'
             config['llms']['doctor']['model'] = args.doctor
+        elif args.doctor.startswith('gemini'):
+            config['llms']['doctor']['provider'] = 'gemini'
+            config['llms']['doctor']['model'] = args.doctor
 
     # Initialize LLMs from config
     print("\n[Initializing LLMs...]")

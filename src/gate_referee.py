@@ -57,7 +57,8 @@ Evaluate which gates (if any) this should trigger. Return valid JSON only."""
                 user_message=user_message,
                 temperature=0.1,  # Low temp for consistency
                 max_tokens=8000,  # Very high limit to see full reasoning
-                response_format="json"
+                response_format="json",
+                enable_thinking=True  # Judge reasons deeply; budget has room for it
             )
 
             # Strip markdown code fences if present

@@ -5,6 +5,7 @@ Coordinates the three LLMs: Doctor, Referee, Answer Server
 import yaml
 import json
 import os
+import re
 from gate_referee import GateReferee
 from answer_server import AnswerServer
 
@@ -107,27 +108,37 @@ class CaseOrchestrator:
                 "doctor": doctor_response
             })
             
-            # Check if doctor is making final decision
+            # Check if doctor is making a final decision.
+            # A cheap high-recall pre-filter flags a candidate stop; a reasoning
+            # judge then confirms it's a genuine commitment (not information
+            # gathering that merely contains words like "plan:") before the case
+            # is ended. This replaces brittle substring-only stop detection.
             if self._is_final_decision(doctor_response):
+                is_final, confirm_reason = self._confirm_final_decision(doctor_response)
                 if verbose:
-                    print("\n[FINAL DECISION DETECTED]")
+                    verdict = "FINAL DECISION" if is_final else "still working — continuing"
+                    print(f"\n[STOP FLAGGED -> judge: {verdict}]\n   {confirm_reason}")
 
-                # V0.0.3: Extract and validate disposition
-                disposition, validation_result = self._extract_disposition(doctor_response)
-                score = self._score_decision(disposition, validation_result)
+                if is_final:
+                    # V0.0.3: Extract and validate disposition
+                    disposition, validation_result = self._extract_disposition(doctor_response)
+                    score = self._score_decision(disposition, validation_result)
 
-                if verbose:
-                    self._print_final_score(score)
+                    if verbose:
+                        self._print_final_score(score)
 
-                return {
-                    "case_id": self.case["id"],
-                    "status": "completed",
-                    "conversation": self.conversation_log,
-                    "score": score,
-                    "gates_unlocked": self.unlocked_gates,
-                    "turns": self.turn_count,
-                    "validation": validation_result  # V0.0.3: Include validation details
-                }
+                    return {
+                        "case_id": self.case["id"],
+                        "status": "completed",
+                        "conversation": self.conversation_log,
+                        "score": score,
+                        "gates_unlocked": self.unlocked_gates,
+                        "turns": self.turn_count,
+                        "validation": validation_result,  # V0.0.3: Include validation details
+                        "stop_confirmation": confirm_reason
+                    }
+                # Judge says the doctor is still working: fall through and
+                # continue the case this turn (referee + answer server).
             
             # 2. REFEREE evaluates if gates open
             if verbose:
@@ -403,7 +414,58 @@ Return ONLY valid JSON:"""
             return False
 
         return any(marker in text_lower for marker in weak_markers)
-    
+
+    def _confirm_final_decision(self, doctor_response):
+        """Reasoning judge that confirms whether the doctor is genuinely
+        committing to a final disposition, versus still gathering information
+        or hedging. Called only when the cheap pre-filter flags a candidate
+        stop, so it corrects the pre-filter's false positives (e.g. an
+        "Orthopedic Plan:" header tripping the "plan:" marker) without ending
+        the case prematurely. Returns (is_final: bool, reasoning: str)."""
+        choices = self.case["decisions"]["disposition"]["choices"]
+        options = "\n".join(f"  - {c['id']}: {c['label']}" for c in choices)
+        prompt = f"""A physician is working through an emergency case over multiple turns. \
+Below is their LATEST message. Decide whether the physician is COMMITTING to a final \
+disposition right now (ending their workup), or is still gathering information, \
+reasoning out loud, or hedging (in which case the case should continue).
+
+A final decision means they have chosen a definitive disposition and are ready to stop \
+(e.g. discharge, escalate, admit, proceed, or defer with a concrete committed plan). \
+Requesting exam findings, labs, imaging, or history, or saying things like "before I \
+decide" or listing an "Orthopedic Plan:" question, is NOT a final decision even if the \
+words "plan" or "decision" appear.
+
+Available final dispositions for this case:
+{options}
+
+Physician's latest message:
+---
+{doctor_response}
+---
+
+Return ONLY valid JSON:
+{{"is_final_decision": true or false, "confidence": 0.0-1.0, "reasoning": "one short sentence"}}"""
+
+        try:
+            raw = self.referee.llm.generate(
+                system_prompt="You are a clinical decision adjudicator. Return only valid JSON, no other text.",
+                user_message=prompt,
+                temperature=0.0,
+                max_tokens=1000,
+                response_format="json",
+                enable_thinking=True  # reasoning judge, not a substring match
+            )
+            match = re.search(r'\{.*\}', raw, re.DOTALL)
+            data = json.loads(match.group(0)) if match else {}
+            is_final = bool(data.get("is_final_decision", False))
+            confidence = data.get("confidence", 1.0)
+            if isinstance(confidence, (int, float)) and confidence < 0.5:
+                is_final = False  # low-confidence "final" -> keep working
+            return is_final, data.get("reasoning", "")
+        except Exception as e:
+            # On judge failure, don't end the case prematurely: let it continue.
+            return False, f"stop-judge error, continuing case: {e}"
+
     def _extract_disposition(self, text):
         """Extract and validate disposition from doctor's final decision
 

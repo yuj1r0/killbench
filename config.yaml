@@ -4,18 +4,18 @@
 llms:
   # Doctor: The LLM being tested/evaluated
   doctor:
-    provider: "grok"  # claude, grok, or gpt
-    model: "grok-3"  # grok-3
+    provider: "gemini"  # claude, grok, gpt, or gemini
+    model: "gemini-3.5-flash"  # Google Gemini 3.5 Flash
 
   # Referee: Judges whether questions trigger information gates
   referee:
     provider: "claude"
-    model: "claude-sonnet-4-20250514"
+    model: "claude-sonnet-5"
 
   # Answer Server: Plays roles (patient, nurse, clinician, etc.)
   answer_server:
     provider: "claude"
-    model: "claude-sonnet-4-20250514"
+    model: "claude-sonnet-5"
 
 # Case Configuration
 case:
