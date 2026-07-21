@@ -3,13 +3,26 @@ LLM Client Wrappers
 Provides unified interface for different LLM providers
 """
 import os
+import threading
 from anthropic import Anthropic, BadRequestError
 from openai import OpenAI
 
 
 class LLMClient:
     """Base class for LLM clients"""
-    
+
+    def __init__(self):
+        # Cumulative token usage across all calls to this client (thread-safe,
+        # so it's correct under the parallel benchmark runner).
+        self.usage = {"input_tokens": 0, "output_tokens": 0, "calls": 0}
+        self._usage_lock = threading.Lock()
+
+    def _record_usage(self, input_tokens, output_tokens):
+        with self._usage_lock:
+            self.usage["input_tokens"] += int(input_tokens or 0)
+            self.usage["output_tokens"] += int(output_tokens or 0)
+            self.usage["calls"] += 1
+
     def generate(self, system_prompt, user_message=None, conversation_history=None,
                  temperature=0.7, max_tokens=2000, response_format=None,
                  enable_thinking=False):
@@ -37,6 +50,7 @@ class ClaudeClient(LLMClient):
     """Anthropic Claude client"""
     
     def __init__(self, api_key=None, model="claude-sonnet-4-20250514"):
+        super().__init__()
         self.client = Anthropic(api_key=api_key or os.getenv("ANTHROPIC_API_KEY"), max_retries=5)
         self.model = model
     
@@ -83,6 +97,9 @@ class ClaudeClient(LLMClient):
                 if not stripped:
                     raise
 
+        if response.usage:
+            self._record_usage(response.usage.input_tokens, response.usage.output_tokens)
+
         # Newer models may return thinking blocks before the text block, so
         # return the first text block rather than assuming content[0]; default
         # to "" so an empty/thinking-only response never crashes the run.
@@ -93,6 +110,7 @@ class GrokClient(LLMClient):
     """xAI Grok client (uses OpenAI-compatible API)"""
     
     def __init__(self, api_key=None, model="grok-beta"):
+        super().__init__()
         self.client = OpenAI(
             api_key=api_key or os.getenv("XAI_API_KEY"),
             base_url="https://api.x.ai/v1",
@@ -127,6 +145,9 @@ class GrokClient(LLMClient):
 
         response = self.client.chat.completions.create(**kwargs)
 
+        if response.usage:
+            self._record_usage(response.usage.prompt_tokens, response.usage.completion_tokens)
+
         return response.choices[0].message.content
 
 
@@ -134,6 +155,7 @@ class GPTClient(LLMClient):
     """OpenAI GPT client"""
     
     def __init__(self, api_key=None, model="gpt-4"):
+        super().__init__()
         self.client = OpenAI(api_key=api_key or os.getenv("OPENAI_API_KEY"), max_retries=5)
         self.model = model
     
@@ -163,7 +185,10 @@ class GPTClient(LLMClient):
             kwargs["response_format"] = {"type": "json_object"}
         
         response = self.client.chat.completions.create(**kwargs)
-        
+
+        if response.usage:
+            self._record_usage(response.usage.prompt_tokens, response.usage.completion_tokens)
+
         return response.choices[0].message.content
 
 
@@ -171,6 +196,7 @@ class GeminiClient(LLMClient):
     """Google Gemini client (uses OpenAI-compatible API)"""
 
     def __init__(self, api_key=None, model="gemini-2.5-flash"):
+        super().__init__()
         self.client = OpenAI(
             api_key=api_key or os.getenv("GOOGLE_API_KEY"),
             base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
@@ -204,6 +230,9 @@ class GeminiClient(LLMClient):
             kwargs["response_format"] = {"type": "json_object"}
 
         response = self.client.chat.completions.create(**kwargs)
+
+        if response.usage:
+            self._record_usage(response.usage.prompt_tokens, response.usage.completion_tokens)
 
         return response.choices[0].message.content
 

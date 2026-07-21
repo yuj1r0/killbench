@@ -27,6 +27,40 @@ import json
 import yaml
 import argparse
 
+# ---- Pricing ($ per 1M tokens) -----------------------------------------------
+# Used to turn recorded token counts into a cost estimate for the score-vs-cost
+# Pareto view. VERIFY these before quoting costs -- non-Anthropic prices in
+# particular are placeholders. Key by model id substring (first match wins).
+PRICES = {
+    # Anthropic (from the claude-api reference; Sonnet 5 shown at list price)
+    "claude-sonnet-5":   {"in": 3.00,  "out": 15.00},
+    "claude-sonnet-4":   {"in": 3.00,  "out": 15.00},
+    "claude-opus-4":     {"in": 5.00,  "out": 25.00},
+    "claude-haiku-4":    {"in": 1.00,  "out": 5.00},
+    # Others -- PLACEHOLDERS, confirm against the provider's current pricing
+    "gpt-4.1":           {"in": 2.00,  "out": 8.00},
+    "gpt-4o":            {"in": 2.50,  "out": 10.00},
+    "gemini-3.5-flash":  {"in": 0.30,  "out": 2.50},
+    "grok-4":            {"in": 3.00,  "out": 15.00},
+    "grok-3":            {"in": 3.00,  "out": 15.00},
+}
+
+
+def price_for(model):
+    for key, p in PRICES.items():
+        if key in (model or ""):
+            return p
+    return None
+
+
+def cost_of(usage):
+    """($cost, has_price) for a {'model','input_tokens','output_tokens'} entry."""
+    p = price_for(usage.get("model"))
+    if not p:
+        return 0.0, False
+    return (usage.get("input_tokens", 0) * p["in"]
+            + usage.get("output_tokens", 0) * p["out"]) / 1_000_000, True
+
 # ---- Scoring knobs -----------------------------------------------------------
 DECISION_POINTS = 50.0        # points for the correct disposition
 VOI_CAP = 50.0                # thoroughness (VoI) contribution capped at this
@@ -259,6 +293,32 @@ def main():
     print(f"  Accuracy (all cases)    : {km['accuracy']:.1f}%  ({km['n_total']} cases)")
     print(f"  Benign Overcalls        : {km['benign_overcalls']}  (of {km['n_benign']} benign cases)")
     print(f"  Average Turns           : {km['avg_turns']:.1f}")
+
+    # Tokens & cost (for the score-vs-cost Pareto view)
+    usage = summary.get("usage")
+    if usage:
+        print("\nTOKENS & COST")
+        print("-" * 78)
+        grand_cost = 0.0; any_priced = False; doctor_cost = 0.0
+        for role in ("doctor", "referee", "answer_server"):
+            u = usage.get(role, {})
+            c, priced = cost_of(u)
+            grand_cost += c; any_priced = any_priced or priced
+            if role == "doctor":
+                doctor_cost = c
+            tok = u.get("input_tokens", 0) + u.get("output_tokens", 0)
+            cost_str = f"${c:.3f}" if priced else "  n/a "
+            print(f"  {role:<14} {u.get('model','?'):<20} "
+                  f"{u.get('input_tokens',0):>9,} in {u.get('output_tokens',0):>8,} out "
+                  f"{tok:>10,} tot  {cost_str}")
+        n = km['n_total'] or 1
+        print("-" * 78)
+        print(f"  Doctor cost (model under test): ${doctor_cost:.3f}  (${doctor_cost/n:.4f}/case)")
+        if any_priced:
+            print(f"  Total run cost (all roles)    : ${grand_cost:.3f}")
+            if doctor_cost:
+                print(f"  Efficiency: {final:.1f} pts @ ${doctor_cost:.3f} doctor-cost = {final/doctor_cost:.0f} pts/$")
+        print("  (prices from PRICES table; verify non-Anthropic rates before quoting)")
     print("=" * 78 + "\n")
 
 
