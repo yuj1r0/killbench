@@ -3,6 +3,7 @@ LLM Client Wrappers
 Provides unified interface for different LLM providers
 """
 import os
+import time
 import threading
 from anthropic import Anthropic, BadRequestError
 from openai import OpenAI
@@ -12,16 +13,21 @@ class LLMClient:
     """Base class for LLM clients"""
 
     def __init__(self):
-        # Cumulative token usage across all calls to this client (thread-safe,
-        # so it's correct under the parallel benchmark runner).
+        # Cumulative token usage + per-call latency across all calls to this
+        # client (thread-safe, so it's correct under the parallel runner).
+        # NOTE: latency is wall-clock per generate() call, so it's only a true
+        # response-time measure at --workers 1; higher concurrency inflates it.
         self.usage = {"input_tokens": 0, "output_tokens": 0, "calls": 0}
+        self.latencies = []  # seconds per generate() call
         self._usage_lock = threading.Lock()
 
-    def _record_usage(self, input_tokens, output_tokens):
+    def _record_usage(self, input_tokens, output_tokens, latency=None):
         with self._usage_lock:
             self.usage["input_tokens"] += int(input_tokens or 0)
             self.usage["output_tokens"] += int(output_tokens or 0)
             self.usage["calls"] += 1
+            if latency is not None:
+                self.latencies.append(round(latency, 3))
 
     def generate(self, system_prompt, user_message=None, conversation_history=None,
                  temperature=0.7, max_tokens=2000, response_format=None,
@@ -81,6 +87,7 @@ class ClaudeClient(LLMClient):
             messages=messages,
             thinking={"type": "adaptive"} if enable_thinking else {"type": "disabled"},
         )
+        t0 = time.perf_counter()
         for _ in range(2):
             try:
                 response = self.client.messages.create(**kwargs)
@@ -96,9 +103,10 @@ class ClaudeClient(LLMClient):
                     stripped = True
                 if not stripped:
                     raise
+        latency = time.perf_counter() - t0
 
-        if response.usage:
-            self._record_usage(response.usage.input_tokens, response.usage.output_tokens)
+        u = response.usage
+        self._record_usage(u.input_tokens if u else 0, u.output_tokens if u else 0, latency)
 
         # Newer models may return thinking blocks before the text block, so
         # return the first text block rather than assuming content[0]; default
@@ -143,10 +151,12 @@ class GrokClient(LLMClient):
         if response_format == "json":
             kwargs["response_format"] = {"type": "json_object"}
 
+        t0 = time.perf_counter()
         response = self.client.chat.completions.create(**kwargs)
+        latency = time.perf_counter() - t0
 
-        if response.usage:
-            self._record_usage(response.usage.prompt_tokens, response.usage.completion_tokens)
+        u = response.usage
+        self._record_usage(u.prompt_tokens if u else 0, u.completion_tokens if u else 0, latency)
 
         return response.choices[0].message.content
 
@@ -184,10 +194,12 @@ class GPTClient(LLMClient):
         if response_format == "json":
             kwargs["response_format"] = {"type": "json_object"}
         
+        t0 = time.perf_counter()
         response = self.client.chat.completions.create(**kwargs)
+        latency = time.perf_counter() - t0
 
-        if response.usage:
-            self._record_usage(response.usage.prompt_tokens, response.usage.completion_tokens)
+        u = response.usage
+        self._record_usage(u.prompt_tokens if u else 0, u.completion_tokens if u else 0, latency)
 
         return response.choices[0].message.content
 
@@ -229,10 +241,12 @@ class GeminiClient(LLMClient):
         if response_format == "json":
             kwargs["response_format"] = {"type": "json_object"}
 
+        t0 = time.perf_counter()
         response = self.client.chat.completions.create(**kwargs)
+        latency = time.perf_counter() - t0
 
-        if response.usage:
-            self._record_usage(response.usage.prompt_tokens, response.usage.completion_tokens)
+        u = response.usage
+        self._record_usage(u.prompt_tokens if u else 0, u.completion_tokens if u else 0, latency)
 
         return response.choices[0].message.content
 

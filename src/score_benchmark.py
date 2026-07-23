@@ -67,6 +67,16 @@ def cost_of(usage):
     return (usage.get("input_tokens", 0) * p["in"]
             + usage.get("output_tokens", 0) * p["out"]) / 1_000_000, True
 
+
+def latency_stats(latencies):
+    """mean / median / p95 / max response time (seconds) for a list of latencies."""
+    if not latencies:
+        return None
+    s = sorted(latencies)
+    n = len(s)
+    pct = lambda p: s[min(n - 1, int(p / 100 * n))]
+    return {"n": n, "mean": sum(s) / n, "median": pct(50), "p95": pct(95), "max": s[-1]}
+
 # ---- Scoring knobs -----------------------------------------------------------
 DECISION_POINTS = 50.0        # points for the correct disposition
 VOI_CAP = 50.0                # thoroughness (VoI) contribution capped at this
@@ -325,6 +335,22 @@ def main():
             if doctor_cost:
                 print(f"  Efficiency: {final:.1f} pts @ ${doctor_cost:.3f} doctor-cost = {final/doctor_cost:.0f} pts/$")
         print("  (prices from PRICES table; verify non-Anthropic rates before quoting)")
+
+        # Response latency (per generate() call). Doctor = time-to-answer of the
+        # model under test -- a real clinical-safety axis (high-stakes decisions
+        # must be made fast). Only a true response-time at workers=1.
+        workers = summary.get("workers")
+        dl = latency_stats(usage.get("doctor", {}).get("latencies"))
+        if dl:
+            print("\nRESPONSE LATENCY (per turn, seconds)")
+            print("-" * 78)
+            for role in ("doctor", "referee", "answer_server"):
+                st = latency_stats(usage.get(role, {}).get("latencies"))
+                if st:
+                    print(f"  {role:<14} mean {st['mean']:6.1f}s  median {st['median']:6.1f}s  "
+                          f"p95 {st['p95']:6.1f}s  max {st['max']:6.1f}s  (n={st['n']})")
+            note = "" if workers in (1, None) else f"  ⚠ measured at workers={workers}: inflated by concurrency"
+            print(f"  Doctor time-to-answer is the model-under-test latency.{note}")
     print("=" * 78 + "\n")
 
 

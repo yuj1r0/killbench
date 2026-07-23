@@ -181,10 +181,14 @@ def main():
         # tokens isolate the model under test; referee + answer_server are the
         # orchestration overhead.
         'usage': {
-            'doctor': {'model': config['llms']['doctor']['model'], **doctor_llm.usage},
-            'referee': {'model': config['llms']['referee']['model'], **referee_llm.usage},
-            'answer_server': {'model': config['llms']['answer_server']['model'], **answer_llm.usage},
+            'doctor': {'model': config['llms']['doctor']['model'], **doctor_llm.usage,
+                       'latencies': doctor_llm.latencies},
+            'referee': {'model': config['llms']['referee']['model'], **referee_llm.usage,
+                        'latencies': referee_llm.latencies},
+            'answer_server': {'model': config['llms']['answer_server']['model'], **answer_llm.usage,
+                              'latencies': answer_llm.latencies},
         },
+        'workers': args.workers,  # latency is only a true response-time at workers=1
     }
     summary_file = os.path.join(output_dir, f"BATCH_SUMMARY_{batch_stamp}_{doctor_model}.json")
     with open(summary_file, 'w') as f:
