@@ -18,10 +18,15 @@ class CaseOrchestrator:
     - Answer Server (plays all roles)
     """
     
-    def __init__(self, case_yaml_path, doctor_llm, referee_llm, answer_llm, prompts_dir="prompts"):
+    def __init__(self, case_yaml_path, doctor_llm, referee_llm, answer_llm,
+                 prompts_dir="prompts", ehr_noise=""):
         # Load case
         with open(case_yaml_path, 'r') as f:
             self.case = yaml.safe_load(f)
+
+        # Optional synthetic EHR-history noise prepended to the doctor's context
+        # (context-robustness variant); persists across turns via reinjection.
+        self.ehr_noise = ehr_noise
 
         # Initialize components
         self.doctor_llm = doctor_llm
@@ -70,9 +75,12 @@ class CaseOrchestrator:
         if verbose:
             self._print_header()
         
-        # Build initial prompt for doctor
+        # Build initial prompt for doctor (optionally prefixed with EHR-history
+        # noise, which then rides along in the reinjected context every turn)
         initial_prompt = self._build_initial_prompt()
-        
+        if self.ehr_noise:
+            initial_prompt = self.ehr_noise + "\n\n" + initial_prompt
+
         # Doctor's conversation history
         doctor_conversation = [{"role": "user", "content": initial_prompt}]
 

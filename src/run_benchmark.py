@@ -14,6 +14,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 from llm_clients import get_llm_client
 from orchestrator import CaseOrchestrator
+from ehr_noise import generate_ehr
 
 
 def apply_doctor_override(config, doctor):
@@ -56,6 +57,12 @@ def main():
     parser.add_argument('--workers', '-j', type=int, default=4,
                         help='Cases to run concurrently (default 4; cases are independent). '
                              'Use 1 for sequential/verbose output.')
+    parser.add_argument('--ehr-tokens', type=int, default=0,
+                        help='Prepend ~N tokens of synthetic EHR-history noise to the '
+                             'doctor context (context-robustness variant; 0 = off).')
+    parser.add_argument('--ehr-mode', type=str, default='random',
+                        help="EHR noise level: 'random' (L2, irrelevant). "
+                             "relevant/adversarial (L1/L3) not yet implemented.")
     args = parser.parse_args()
 
     load_dotenv()
@@ -92,6 +99,13 @@ def main():
         print(f"\n❌ Error initializing LLMs: {e}")
         return
     print(f"✓ LLMs initialized")
+
+    # Optional EHR-history noise (context-robustness variant), generated once
+    # and shared across all cases so it's a controlled variable.
+    ehr_blob = generate_ehr(args.ehr_tokens, args.ehr_mode) if args.ehr_tokens else ""
+    if ehr_blob:
+        print(f"  EHR noise: ~{args.ehr_tokens} tokens ({args.ehr_mode}), "
+              f"{len(ehr_blob):,} chars prepended to doctor context")
     print(f"\nRunning {len(case_files)} case(s), max {max_turns} turns each.\n")
 
     output_dir = config['output'].get('output_dir', 'outputs')
@@ -115,6 +129,7 @@ def main():
                 doctor_llm=doctor_llm,
                 referee_llm=referee_llm,
                 answer_llm=answer_llm,
+                ehr_noise=ehr_blob,
             )
             result = orchestrator.run_case(max_turns=max_turns, verbose=verbose)
 
@@ -189,6 +204,8 @@ def main():
                               'latencies': answer_llm.latencies},
         },
         'workers': args.workers,  # latency is only a true response-time at workers=1
+        'ehr_noise': {'tokens': args.ehr_tokens, 'mode': args.ehr_mode,
+                      'chars': len(ehr_blob)},
     }
     summary_file = os.path.join(output_dir, f"BATCH_SUMMARY_{batch_stamp}_{doctor_model}.json")
     with open(summary_file, 'w') as f:
