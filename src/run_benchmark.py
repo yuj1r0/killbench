@@ -63,6 +63,10 @@ def main():
     parser.add_argument('--ehr-mode', type=str, default='random',
                         help="EHR noise level: 'random' (L2, irrelevant). "
                              "relevant/adversarial (L1/L3) not yet implemented.")
+    parser.add_argument('--ehr-file', type=str, default=None,
+                        help='Path to an authored EHR-history document (L1/L3) to prepend '
+                             'to every case, instead of generated noise. Takes precedence '
+                             'over --ehr-tokens.')
     args = parser.parse_args()
 
     load_dotenv()
@@ -100,12 +104,19 @@ def main():
         return
     print(f"✓ LLMs initialized")
 
-    # Optional EHR-history noise (context-robustness variant), generated once
-    # and shared across all cases so it's a controlled variable.
-    ehr_blob = generate_ehr(args.ehr_tokens, args.ehr_mode) if args.ehr_tokens else ""
+    # Optional EHR-history noise (context-robustness variant), shared across all
+    # cases so it's a controlled variable. An authored --ehr-file (L1/L3) wins
+    # over the generated random (L2) blob.
+    ehr_mode_used = args.ehr_mode
+    if args.ehr_file:
+        with open(args.ehr_file) as f:
+            ehr_blob = f.read()
+        ehr_mode_used = f"file:{os.path.basename(args.ehr_file)}"
+    else:
+        ehr_blob = generate_ehr(args.ehr_tokens, args.ehr_mode) if args.ehr_tokens else ""
     if ehr_blob:
-        print(f"  EHR noise: ~{args.ehr_tokens} tokens ({args.ehr_mode}), "
-              f"{len(ehr_blob):,} chars prepended to doctor context")
+        print(f"  EHR noise: {ehr_mode_used}, {len(ehr_blob):,} chars (~{len(ehr_blob)//4} tok) "
+              f"prepended to doctor context")
     print(f"\nRunning {len(case_files)} case(s), max {max_turns} turns each.\n")
 
     output_dir = config['output'].get('output_dir', 'outputs')
@@ -204,8 +215,8 @@ def main():
                               'latencies': answer_llm.latencies},
         },
         'workers': args.workers,  # latency is only a true response-time at workers=1
-        'ehr_noise': {'tokens': args.ehr_tokens, 'mode': args.ehr_mode,
-                      'chars': len(ehr_blob)},
+        'ehr_noise': {'tokens': args.ehr_tokens, 'mode': ehr_mode_used,
+                      'chars': len(ehr_blob), 'file': args.ehr_file},
     }
     summary_file = os.path.join(output_dir, f"BATCH_SUMMARY_{batch_stamp}_{doctor_model}.json")
     with open(summary_file, 'w') as f:

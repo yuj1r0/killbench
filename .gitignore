@@ -27,3 +27,6 @@ __pycache__/
 
 # Claude Code local config
 .claude/
+
+# Authored EHR-history stimulus (benchmark content, keep private)
+ehr_histories/
