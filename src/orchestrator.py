@@ -19,7 +19,7 @@ class CaseOrchestrator:
     """
     
     def __init__(self, case_yaml_path, doctor_llm, referee_llm, answer_llm,
-                 prompts_dir="prompts", ehr_noise=""):
+                 prompts_dir="prompts", ehr_noise="", patient_context=""):
         # Load case
         with open(case_yaml_path, 'r') as f:
             self.case = yaml.safe_load(f)
@@ -31,7 +31,7 @@ class CaseOrchestrator:
         # Initialize components
         self.doctor_llm = doctor_llm
         self.referee = GateReferee(self.case, referee_llm)
-        self.answer_server = AnswerServer(self.case, answer_llm)
+        self.answer_server = AnswerServer(self.case, answer_llm, patient_context=patient_context)
 
         # Load prompts
         self.prompts_dir = prompts_dir

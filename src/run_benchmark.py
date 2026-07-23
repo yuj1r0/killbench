@@ -108,15 +108,25 @@ def main():
     # cases so it's a controlled variable. An authored --ehr-file (L1/L3) wins
     # over the generated random (L2) blob.
     ehr_mode_used = args.ehr_mode
+    patient_ctx = ""
     if args.ehr_file:
         with open(args.ehr_file) as f:
             ehr_blob = f.read()
         ehr_mode_used = f"file:{os.path.basename(args.ehr_file)}"
+        # Auto-load a paired patient-recall file (X_history.md -> X_patient_recall.md)
+        # so the patient can corroborate the chart if asked.
+        recall_path = args.ehr_file.replace("_history.md", "_patient_recall.md")
+        if recall_path != args.ehr_file and os.path.exists(recall_path):
+            with open(recall_path) as f:
+                patient_ctx = f.read()
     else:
         ehr_blob = generate_ehr(args.ehr_tokens, args.ehr_mode) if args.ehr_tokens else ""
     if ehr_blob:
         print(f"  EHR noise: {ehr_mode_used}, {len(ehr_blob):,} chars (~{len(ehr_blob)//4} tok) "
               f"prepended to doctor context")
+    if patient_ctx:
+        print(f"  Patient recall: {os.path.basename(recall_path)} ({len(patient_ctx):,} chars) "
+              f"added to patient role")
     print(f"\nRunning {len(case_files)} case(s), max {max_turns} turns each.\n")
 
     output_dir = config['output'].get('output_dir', 'outputs')
@@ -141,6 +151,7 @@ def main():
                 referee_llm=referee_llm,
                 answer_llm=answer_llm,
                 ehr_noise=ehr_blob,
+                patient_context=patient_ctx,
             )
             result = orchestrator.run_case(max_turns=max_turns, verbose=verbose)
 

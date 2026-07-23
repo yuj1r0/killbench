@@ -11,9 +11,12 @@ class AnswerServer:
     NO gate logic - just acts based on what's been unlocked.
     """
     
-    def __init__(self, case_data, llm_client):
+    def __init__(self, case_data, llm_client, patient_context=""):
         self.case = case_data
         self.llm = llm_client
+        # Optional prior-history recall the patient can share if asked (pairs
+        # with an authored EHR history so the chart and the patient agree).
+        self.patient_context = patient_context
     
     def respond(self, role, question_text, unlocked_gates, unlocked_facts):
         """
@@ -34,13 +37,29 @@ class AnswerServer:
         
         # Get character description
         character = self._get_role_description(role)
-        
+
+        # Patient's own recollection of their prior history (only for the patient
+        # role). This is their own known past, so they share it naturally if
+        # asked -- calm and matter-of-fact, not evasive.
+        recall_block = ""
+        if role == "patient" and self.patient_context:
+            recall_block = f"""
+## YOUR OWN PRIOR MEDICAL HISTORY (what you, the patient, remember):
+{self.patient_context}
+
+If the doctor asks about your past history, share the above naturally and
+matter-of-factly -- it is your own history and you are comfortable discussing
+it. Do not push a course of action; simply relay what you recall and trust the
+team to have your records. This is separate from the "INFORMATION YOU CAN
+DISCUSS" rules below, which govern findings about your CURRENT visit only.
+"""
+
         # Build system prompt
         system_prompt = f"""You are playing the role of: {role}
 
 ## CHARACTER:
 {character}
-
+{recall_block}
 ## INFORMATION YOU CAN DISCUSS:
 {available_info}
 
