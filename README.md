@@ -59,10 +59,10 @@ python src/leaderboard_svg.py --dir outputs --out-dir docs
 Killbench uses a **three-LLM architecture** that separates the tested model from the simulation infrastructure:
 
 ```
-┌─────────────────┐     questions/actions     ┌──────────────┐
+┌─────────────────┐     questions/actions      ┌──────────────┐
 │   Tested LLM    │ ──────────────────────────▶│ Gate Referee │
-│   (Doctor)      │                            │ (Sonnet 4)   │
-│                 │     gates triggered?        │              │
+│   (Doctor)      │                            │              │
+│                 │     gates triggered?       │              │
 │                 │ ◀──────────────────────────│              │
 └────────┬────────┘                            └──────────────┘
          │                                            │
@@ -71,7 +71,7 @@ Killbench uses a **three-LLM architecture** that separates the tested model from
          │
          │         role-played response        ┌──────────────┐
          │ ◀───────────────────────────────────│Answer Server │
-         │                                     │ (Sonnet 4)   │
+         │                                     │              │
          └─────────────────────────────────────│              │
                                                └──────────────┘
 ```
