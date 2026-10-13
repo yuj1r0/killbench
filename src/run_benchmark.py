@@ -67,6 +67,22 @@ def main():
                         help='Path to an authored EHR-history document (L1/L3) to prepend '
                              'to every case, instead of generated noise. Takes precedence '
                              'over --ehr-tokens.')
+    parser.add_argument('--effort', type=str, default=None,
+                        choices=['default', 'max', 'low', 'medium', 'high', 'xhigh'],
+                        help="Doctor reasoning effort. 'default' omits the parameter; "
+                             "'max' asks for the hardest setting the model supports "
+                             "(translated per provider). Doctor only -- the referee and "
+                             "answer server stay fixed so the comparison isn't confounded.")
+    parser.add_argument('--doctor-max-tokens', type=int, default=1000,
+                        help='Output budget per doctor turn (default 1000, matching the '
+                             'pre-2026-09 baselines). Thinking tokens come out of this '
+                             'budget, so raise it for max-effort runs or reasoning models '
+                             'can spend the whole allowance and return empty text.')
+    parser.add_argument('--repeat', type=int, default=None,
+                        help='Repeat index for this batch (1-based). Recorded in the summary '
+                             'and stamped into output filenames so repeats never collide.')
+    parser.add_argument('--output-dir', type=str, default=None,
+                        help='Override the output directory from config.yaml.')
     args = parser.parse_args()
 
     load_dotenv()
@@ -129,10 +145,25 @@ def main():
               f"added to patient role")
     print(f"\nRunning {len(case_files)} case(s), max {max_turns} turns each.\n")
 
-    output_dir = config['output'].get('output_dir', 'outputs')
+    output_dir = args.output_dir or config['output'].get('output_dir', 'outputs')
     os.makedirs(output_dir, exist_ok=True)
     doctor_model = config['llms']['doctor']['model'].replace('/', '_').replace('-', '_')
     batch_stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    # Filenames previously carried only a second-resolution timestamp plus the
+    # model, so two batches of the same model (different effort levels, or two
+    # repeats) could silently overwrite each other's per-case JSON. The run tag
+    # makes every arm of the sweep distinct.
+    tag_bits = []
+    if args.effort:
+        tag_bits.append(f"eff{args.effort}")
+    if args.repeat:
+        tag_bits.append(f"r{args.repeat}")
+    run_tag = ("_" + "_".join(tag_bits)) if tag_bits else ""
+
+    print(f"  Doctor effort: {args.effort or 'default (parameter omitted)'} | "
+          f"doctor max_tokens: {args.doctor_max_tokens}"
+          + (f" | repeat {args.repeat}" if args.repeat else ""))
 
     # Verbose per-turn output only makes sense sequentially; with >1 worker the
     # streams would interleave, so we suppress it and print a line per finished case.
@@ -152,11 +183,14 @@ def main():
                 answer_llm=answer_llm,
                 ehr_noise=ehr_blob,
                 patient_context=patient_ctx,
+                doctor_effort=args.effort,
+                doctor_max_tokens=args.doctor_max_tokens,
             )
             result = orchestrator.run_case(max_turns=max_turns, verbose=verbose)
 
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            out_file = os.path.join(output_dir, f"{timestamp}_{case_filename}_{doctor_model}.json")
+            out_file = os.path.join(
+                output_dir, f"{timestamp}_{case_filename}_{doctor_model}{run_tag}.json")
             with open(out_file, 'w') as f:
                 json.dump(result, f, indent=2)
 
@@ -226,10 +260,14 @@ def main():
                               'latencies': answer_llm.latencies},
         },
         'workers': args.workers,  # latency is only a true response-time at workers=1
+        'effort': args.effort,
+        'doctor_max_tokens': args.doctor_max_tokens,
+        'repeat': args.repeat,
         'ehr_noise': {'tokens': args.ehr_tokens, 'mode': ehr_mode_used,
                       'chars': len(ehr_blob), 'file': args.ehr_file},
     }
-    summary_file = os.path.join(output_dir, f"BATCH_SUMMARY_{batch_stamp}_{doctor_model}.json")
+    summary_file = os.path.join(
+        output_dir, f"BATCH_SUMMARY_{batch_stamp}_{doctor_model}{run_tag}.json")
     with open(summary_file, 'w') as f:
         json.dump(summary, f, indent=2)
 

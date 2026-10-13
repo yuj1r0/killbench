@@ -32,40 +32,73 @@ import argparse
 # Pareto view. VERIFY these before quoting costs -- non-Anthropic prices in
 # particular are placeholders. Key by model id substring (first match wins).
 PRICES = {
-    # Anthropic (claude.com/pricing). NOTE: Sonnet 5 is at introductory pricing
-    # ($2/$10) through 2026-08-31; it becomes $3/$15 on 2026-09-01.
-    "claude-fable-5":         {"in": 10.00, "out": 50.00},
-    "claude-sonnet-5":        {"in": 2.00,  "out": 10.00},   # intro; $3/$15 after 2026-08-31
-    "claude-sonnet-4":        {"in": 3.00,  "out": 15.00},
-    "claude-opus-4":          {"in": 5.00,  "out": 25.00},
-    "claude-haiku-4":         {"in": 1.00,  "out": 5.00},
-    # Gemini (ai.google.dev pricing, paid tier). More specific keys first so
-    # "-flash-lite" isn't shadowed by the "-flash" substring match.
-    "gemini-3.5-flash-lite":  {"in": 0.30,  "out": 2.50},
-    "gemini-3.5-flash":       {"in": 1.50,  "out": 9.00},
-    "gemini-3.6-flash":       {"in": 1.50,  "out": 7.50},
-    # Others -- PLACEHOLDERS, confirm against the provider's current pricing
-    "gpt-4.1":                {"in": 2.00,  "out": 8.00},
-    "gpt-4o":                 {"in": 2.50,  "out": 10.00},
-    "grok-4":                 {"in": 3.00,  "out": 15.00},
-    "grok-3":                 {"in": 3.00,  "out": 15.00},
+    # Anthropic (platform.claude.com/docs pricing). Verified 2026-09-02.
+    "claude-fable-5-1":       {"in": 10.00, "out": 50.00, "cached_in": 0.25},
+    "claude-fable-5":         {"in": 10.00, "out": 50.00, "cached_in": 1.00},
+    "claude-opus-5":          {"in": 5.00,  "out": 25.00, "cached_in": 0.50},
+    "claude-opus-4":          {"in": 5.00,  "out": 25.00, "cached_in": 0.50},
+    "claude-sonnet-5":        {"in": 2.00,  "out": 10.00, "cached_in": 0.20},
+    "claude-sonnet-4":        {"in": 3.00,  "out": 15.00, "cached_in": 0.30},
+    "claude-haiku-4-5":       {"in": 1.00,  "out": 5.00,  "cached_in": 0.10},
+    "claude-haiku-4":         {"in": 1.00,  "out": 5.00,  "cached_in": 0.10},
+    # OpenAI (developers.openai.com pricing). Verified 2026-09-02. NOTE: Sol's
+    # $4/$20 is a promotional rate guaranteed only through 2026-11-21.
+    "gpt-5.6-sol":            {"in": 4.00,  "out": 20.00, "cached_in": 0.40},
+    "gpt-5.6-terra":          {"in": 2.00,  "out": 12.00, "cached_in": 0.20},
+    "gpt-5.6-luna":           {"in": 0.20,  "out": 1.20,  "cached_in": 0.02},
+    "gpt-4.1":                {"in": 2.00,  "out": 8.00,  "cached_in": 0.50},
+    "gpt-4o":                 {"in": 2.50,  "out": 10.00, "cached_in": 1.25},
+    # xAI (docs.x.ai pricing). Verified 2026-09-02. Prices double above a
+    # 200K-token prompt; these are the short-context rates.
+    "grok-4.6":               {"in": 2.00,  "out": 6.00,  "cached_in": 0.50},
+    "grok-4":                 {"in": 3.00,  "out": 15.00, "cached_in": 0.75},
+    "grok-3":                 {"in": 3.00,  "out": 15.00, "cached_in": 0.75},
+    # Google (ai.google.dev pricing, paid tier). Verified 2026-09-02. Gemini
+    # 3.8 Flash is at introductory pricing through 2026-12-31 (then $1.50/$7.50).
+    "gemini-3.8-flash":       {"in": 0.75,  "out": 3.75,  "cached_in": 0.075},
+    "gemini-3.7-flash":       {"in": 1.50,  "out": 7.50,  "cached_in": 0.15},
+    "gemini-3.6-flash":       {"in": 1.50,  "out": 7.50,  "cached_in": 0.15},
+    "gemini-3.5-flash-lite":  {"in": 0.30,  "out": 2.50,  "cached_in": 0.03},
+    "gemini-3.5-flash":       {"in": 1.50,  "out": 9.00,  "cached_in": 0.15},
 }
 
 
 def price_for(model):
+    """Exact match first, then the LONGEST matching prefix.
+
+    Plain substring-match-in-dict-order silently mispriced models: "grok-4"
+    matched "grok-4.6" and billed it at $3/$15 instead of $2/$6. Longest-match
+    makes adding a model safe regardless of dict order.
+    """
+    m = model or ""
+    if m in PRICES:
+        return PRICES[m]
+    best = None
     for key, p in PRICES.items():
-        if key in (model or ""):
-            return p
-    return None
+        if m.startswith(key) or key in m:
+            if best is None or len(key) > len(best[0]):
+                best = (key, p)
+    return best[1] if best else None
 
 
 def cost_of(usage):
-    """($cost, has_price) for a {'model','input_tokens','output_tokens'} entry."""
+    """($cost, has_price) for a usage entry.
+
+    Cached input bills at a steep discount and is reported *in addition to*
+    input_tokens by some providers, so it is subtracted out before charging the
+    full rate. Thinking tokens already bill as output and are included in
+    output_tokens by every client here, so they are NOT added again.
+    """
     p = price_for(usage.get("model"))
     if not p:
         return 0.0, False
-    return (usage.get("input_tokens", 0) * p["in"]
-            + usage.get("output_tokens", 0) * p["out"]) / 1_000_000, True
+    total_in = usage.get("input_tokens", 0) or 0
+    cached_in = min(usage.get("cached_input_tokens", 0) or 0, total_in)
+    fresh_in = total_in - cached_in
+    cost = (fresh_in * p["in"]
+            + cached_in * p.get("cached_in", p["in"])
+            + (usage.get("output_tokens", 0) or 0) * p["out"]) / 1_000_000
+    return cost, True
 
 
 def latency_stats(latencies):
@@ -237,6 +270,10 @@ def score_batch(summary, include_incomplete=True):
         maxposs += max_cs * w
         per_case.append({
             "case": r.get("case_id") or os.path.basename(r["case_file"]),
+            # case_id is NOT unique -- several case files share one (e.g. the
+            # -COMPLETE variants), so anything keying per-case data by it will
+            # silently collapse cases together. Carry the file path, which is.
+            "case_file": r["case_file"],
             "benign": is_benign(r["case_file"], r.get("case_id")),
             "outcome": outcome, "case_score": cs, "weight": w,
             "weighted": cs * w, "max_weighted": max_cs * w,

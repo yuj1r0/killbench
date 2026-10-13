@@ -19,7 +19,8 @@ class CaseOrchestrator:
     """
     
     def __init__(self, case_yaml_path, doctor_llm, referee_llm, answer_llm,
-                 prompts_dir="prompts", ehr_noise="", patient_context=""):
+                 prompts_dir="prompts", ehr_noise="", patient_context="",
+                 doctor_effort=None, doctor_max_tokens=1000):
         # Load case
         with open(case_yaml_path, 'r') as f:
             self.case = yaml.safe_load(f)
@@ -30,6 +31,11 @@ class CaseOrchestrator:
 
         # Initialize components
         self.doctor_llm = doctor_llm
+        # Reasoning effort and token budget apply to the DOCTOR ONLY -- the
+        # referee and answer server stay fixed across the whole sweep, or the
+        # cross-model comparison would be confounded by its own scoring.
+        self.doctor_effort = doctor_effort
+        self.doctor_max_tokens = doctor_max_tokens
         self.referee = GateReferee(self.case, referee_llm)
         self.answer_server = AnswerServer(self.case, answer_llm, patient_context=patient_context)
 
@@ -100,11 +106,16 @@ class CaseOrchestrator:
             if verbose:
                 print("\n[DOCTOR THINKING...]")
             
+            # Thinking tokens are drawn from the same output budget, so a
+            # max-effort model can spend the whole allowance reasoning and
+            # return empty text -- hence the configurable, larger budget.
             doctor_response = self.doctor_llm.generate(
                 system_prompt=doctor_system,
                 conversation_history=doctor_conversation,
                 temperature=0.7,
-                max_tokens=1000
+                max_tokens=self.doctor_max_tokens,
+                effort=self.doctor_effort,
+                enable_thinking=bool(self.doctor_effort),
             )
             
             if verbose:
